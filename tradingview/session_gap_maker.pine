@@ -26,7 +26,7 @@ upCol     = input.color(color.new(color.lime, 80), "Gap up fill")
 dnCol     = input.color(color.new(color.red, 80),  "Gap down fill")
 fillCol   = input.color(color.new(color.gray, 85), "Filled color")
 midCol    = input.color(color.yellow, "50% line color")
-maxActive = input.int(30, "Max active (unfilled) gaps", minval=1)
+maxActive = input.int(200, "Max active (unfilled) gaps", minval=1)
 
 // ---------------- Gap event / open / prior close ----------------
 // Session (RTH) path
