@@ -1,20 +1,21 @@
 //@version=5
-// Session Gap Maker — shades the gap between one session's CLOSE and the next
-// session's OPEN, draws the 50% midpoint (the key half-gap level), and flags the
-// gap when price fills it.
+// Gap Maker — shades the gap between one period's CLOSE and the next period's
+// OPEN, draws the 50% midpoint (the key half-gap level), and flags the gap when
+// price fills it.
 //
-// Default session 0930-1600 (New York) = the US cash / Regular Trading Hours
-// session, so the gap is "yesterday's 4pm close -> today's 9:30 open" — the RTH
-// overnight gap for NQ/ES. Change the Session input for a different window.
+// Gap basis (input):
+//   Weekly       -> last week's close  -> new week's open   (weekend gap; DEFAULT)
+//   Daily        -> prior day's close  -> today's open
+//   Session (RTH)-> the session's close -> next session open (0930-1600 = cash)
 //
 // Green box = gap up · Red box = gap down · gray = filled · dashed line = 50%.
 // Paste into TradingView's Pine Editor -> Add to chart. Use an intraday chart.
-indicator("Session Gap Maker", overlay=true, max_boxes_count=500, max_labels_count=500, max_lines_count=500)
+indicator("Gap Maker", overlay=true, max_boxes_count=500, max_labels_count=500, max_lines_count=500)
 
 // ---------------- Inputs ----------------
-sess      = input.session("0930-1600", "Session (close→open gap window)",
-   tooltip="Gap = this session's close to its next open. Default = US cash/RTH session.")
-tz        = input.string("America/New_York", "Session timezone")
+gapMode   = input.string("Weekly", "Gap basis", options=["Weekly", "Daily", "Session (RTH)"])
+sess      = input.session("0930-1600", "RTH session (Session mode only)")
+tz        = input.string("America/New_York", "Timezone")
 minGap    = input.float(0.0, "Min gap size (points)", minval=0)
 showMid   = input.bool(true,  "Show 50% midpoint line")
 fillAt50  = input.bool(false, "Count gap 'filled' at 50% (else full close)")
@@ -27,10 +28,29 @@ fillCol   = input.color(color.new(color.gray, 85), "Filled color")
 midCol    = input.color(color.yellow, "50% line color")
 maxActive = input.int(30, "Max active (unfilled) gaps", minval=1)
 
-// ---------------- Session detection ----------------
+// ---------------- Gap event / open / prior close ----------------
+// Session (RTH) path
 inSess = not na(time(timeframe.period, sess, tz))
-isOpen = inSess and not inSess[1]         // first bar of the session
-var float lastSessClose = na              // holds yesterday's close at the next open
+isSessOpen = inSess and not inSess[1]
+var float lastSessClose = na
+
+// Weekly / Daily path (higher-timeframe close -> open)
+htf = gapMode == "Weekly" ? "W" : "D"
+htfOpen      = request.security(syminfo.tickerid, htf, open,      lookahead=barmerge.lookahead_on)
+htfPrevClose = request.security(syminfo.tickerid, htf, close[1],  lookahead=barmerge.lookahead_on)
+htfNew       = timeframe.change(htf)
+
+bool  isNewGap = false
+float gO  = na
+float gPC = na
+if gapMode == "Session (RTH)"
+    isNewGap := isSessOpen and not na(lastSessClose)
+    gO  := open
+    gPC := lastSessClose
+else
+    isNewGap := htfNew and not na(htfPrevClose)
+    gO  := htfOpen
+    gPC := htfPrevClose
 
 // ---------------- Active-gap state ----------------
 var gBox    = array.new_box()
@@ -40,10 +60,10 @@ var gLbl    = array.new_label()   // gap-size label
 var gMid    = array.new_line()    // 50% line
 var gMidLbl = array.new_label()   // 50% price label
 
-// ---------------- Create a gap at the session open ----------------
-if isOpen and not na(lastSessClose)
-    o  = open
-    pc = lastSessClose
+// ---------------- Create a gap ----------------
+if isNewGap
+    o  = gO
+    pc = gPC
     gsize = math.abs(o - pc)
     if gsize >= minGap and o != pc
         up  = o > pc
@@ -72,7 +92,6 @@ if isOpen and not na(lastSessClose)
         array.push(gLbl, lb)
         array.push(gMid, ml)
         array.push(gMidLbl, mlb)
-        // cap active gaps (drop oldest)
         if array.size(gBox) > maxActive
             box.delete(array.shift(gBox))
             array.shift(gFill)
@@ -87,7 +106,7 @@ if isOpen and not na(lastSessClose)
             if not na(ml0)
                 label.delete(ml0)
 
-// ---------------- Extend / fill-check active gaps ----------------
+// ---------------- Extend / fill-check ----------------
 if array.size(gBox) > 0
     for i = array.size(gBox) - 1 to 0
         b   = array.get(gBox, i)
@@ -125,6 +144,6 @@ if array.size(gBox) > 0
             if not na(mlb)
                 label.set_x(mlb, bar_index)
 
-// update AFTER gap logic so the open bar reads yesterday's close
+// keep the session close current (used by Session mode)
 if inSess
     lastSessClose := close
