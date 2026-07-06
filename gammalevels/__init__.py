@@ -13,7 +13,16 @@ Public API:
 from .blackscholes import gamma
 from .gex import GexProfile, OptionRow, compute_profile
 from .levels import HedgeLevels, compute_hedge_levels
-from .data import ChainSnapshot, fetch_yfinance_chain, qqq_to_nq_factor
+from .data import (
+    ChainSnapshot,
+    FutureLevelsInput,
+    fetch_chain_for_future,
+    fetch_future_price,
+    fetch_yfinance_chain,
+    qqq_to_nq_factor,
+    scale_factor,
+    FUTURE_MAP,
+)
 
 __all__ = [
     "gamma",
@@ -23,8 +32,13 @@ __all__ = [
     "HedgeLevels",
     "compute_hedge_levels",
     "ChainSnapshot",
+    "FutureLevelsInput",
     "fetch_yfinance_chain",
+    "fetch_chain_for_future",
+    "fetch_future_price",
     "qqq_to_nq_factor",
+    "scale_factor",
+    "FUTURE_MAP",
 ]
 
 __version__ = "0.1.0"

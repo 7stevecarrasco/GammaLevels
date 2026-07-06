@@ -115,3 +115,84 @@ def qqq_to_nq_factor(qqq_spot: float, nq_price: float) -> float:
     if qqq_spot <= 0:
         raise ValueError("qqq_spot must be positive")
     return nq_price / qqq_spot
+
+
+def scale_factor(underlying_spot: float, future_price: float) -> float:
+    """Generic strike->future scale = future_price / underlying_spot.
+
+    Works whether the underlying is the index itself (NDX/SPX -> factor ~1) or an
+    ETF proxy (QQQ -> ~41, SPY -> ~10)."""
+    if underlying_spot <= 0:
+        raise ValueError("underlying_spot must be positive")
+    return future_price / underlying_spot
+
+
+# Which options underlying(s) back each future, best first. The engine tries
+# the index (where his levels actually come from) and falls back to the free,
+# reliable ETF proxy if index options aren't available via yfinance.
+FUTURE_MAP = {
+    "NQ": {"future": "NQ=F", "name": "Nasdaq-100", "underlyings": ["^NDX", "QQQ"]},
+    "ES": {"future": "ES=F", "name": "S&P 500", "underlyings": ["^SPX", "^GSPC", "SPY"]},
+}
+
+
+@dataclass
+class FutureLevelsInput:
+    """Everything needed to compute + scale levels for one future."""
+
+    future: str            # "NQ" / "ES"
+    future_price: float    # live front-month future price
+    underlying: str        # options symbol actually used (e.g. "^NDX" or "QQQ")
+    snapshot: ChainSnapshot
+    factor: float          # underlying-strike -> future-price scale
+
+
+def fetch_future_price(future_symbol: str) -> float:
+    """Live front-month future price via yfinance (e.g. 'NQ=F', 'ES=F')."""
+    import yfinance as yf
+
+    t = yf.Ticker(future_symbol)
+    hist = t.history(period="1d")
+    if len(hist):
+        return float(hist["Close"].iloc[-1])
+    return float(t.fast_info["last_price"])
+
+
+def fetch_chain_for_future(
+    future: str,
+    max_expiries: Optional[int] = 8,
+    min_open_interest: float = 0.0,
+    prefer_underlying: Optional[str] = None,
+) -> FutureLevelsInput:
+    """Fetch options + live future price for a future symbol ('NQ' or 'ES').
+
+    Tries the index options first (what his HP/MHP actually derive from), then
+    the ETF proxy.  Also grabs the live future price so levels scale onto the
+    future automatically -- no manual price entry, so this can run unattended.
+    """
+    future = future.upper()
+    if future not in FUTURE_MAP:
+        raise ValueError(f"unknown future {future!r}; known: {list(FUTURE_MAP)}")
+    cfg = FUTURE_MAP[future]
+
+    candidates = [prefer_underlying] if prefer_underlying else list(cfg["underlyings"])
+    snap = None
+    used = None
+    errors = []
+    for u in candidates:
+        try:
+            s = fetch_yfinance_chain(u, max_expiries=max_expiries, min_open_interest=min_open_interest)
+            if s.rows:
+                snap, used = s, u
+                break
+            errors.append(f"{u}: no option rows")
+        except Exception as exc:  # try next underlying
+            errors.append(f"{u}: {exc}")
+    if snap is None:
+        raise RuntimeError(f"could not load options for {future} from {candidates}: " + "; ".join(errors))
+
+    future_price = fetch_future_price(cfg["future"])
+    factor = scale_factor(snap.spot, future_price)
+    return FutureLevelsInput(
+        future=future, future_price=future_price, underlying=used, snapshot=snap, factor=factor
+    )

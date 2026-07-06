@@ -56,16 +56,24 @@ Find the peak / walls / zero-crossing of that profile → your levels. See
 
 ## Data
 
-Uses **QQQ** options (the liquid Nasdaq-100 proxy) pulled free via `yfinance`.
-Because `/NQ ≈ NDX` and `QQQ ≈ NDX / ~41`, QQQ-derived strikes scale straight
-onto your NQ chart:
+Pulled free via `yfinance`. For each future it uses the **index options his
+levels actually come from**, falling back to a liquid ETF proxy if the index
+chain isn't available:
+
+| Future | Index options (preferred) | Free proxy (fallback) |
+|--------|---------------------------|-----------------------|
+| **NQ** | `^NDX` (Nasdaq-100)       | `QQQ` (≈ NDX / 41)    |
+| **ES** | `^SPX` (S&P 500)         | `SPY` (≈ SPX / 10)    |
+
+The live front-month future price (`NQ=F` / `ES=F`) is fetched automatically, so
+strikes scale onto the future with no manual input:
 
 ```
-NQ_level = QQQ_level × (NQ_price / QQQ_price)
+future_level = option_level × (future_price / underlying_spot)
 ```
 
-Enter your live `/NQ` price in the dashboard (or `--nq` on the CLI) and the
-levels are projected onto NQ automatically.
+With the index (NDX/SPX) the factor is ≈ 1; with an ETF proxy it's ≈ 41 (NQ) or
+≈ 10 (ES). Either way the levels land on your NQ/ES chart.
 
 > **Upgrading data later:** the engine only needs a list of `OptionRow`s, so
 > swapping yfinance for a paid NDX feed (Polygon, Theta Data, tastytrade, IBKR)
@@ -90,6 +98,44 @@ python scripts/print_levels.py --nq 29881.5 --pine gammalevels.pine
 `--method` picks how HP/MHP is defined: `peak` (default, biggest magnet),
 `centroid` (gamma-weighted mean — gives smooth, non-round numbers like the
 services post), `flip`, `callwall`, `putwall`.
+
+## Automating it — compute tomorrow's levels yourself
+
+The whole point: **don't wait for anyone's Discord post.** `daily_levels.py`
+computes HP/MHP for NQ and ES with zero manual input — it fetches the index
+options (NDX for NQ, SPX for ES; free QQQ/SPY proxy as fallback) *and* the live
+front-month future price, then writes JSON + a TradingView Pine script per
+future:
+
+```bash
+python scripts/daily_levels.py                 # NQ + ES, writes levels_*.json / .pine
+python scripts/daily_levels.py --method centroid --outdir ~/gammalevels_out
+python scripts/daily_levels.py --future NQ --proxy   # force free QQQ
+```
+
+**Schedule it** so the levels are ready before the 6pm ET Globex open, and
+again after the 9:30am ET NY open (when he says the platform recalculates on
+fresh options data):
+
+*macOS / Linux (`crontab -e`) — times are your local clock:*
+```cron
+# 5:45pm and 9:35am ET (adjust to your timezone)
+45 17 * * 1-5  cd /path/to/GammaLevels && /usr/bin/python3 scripts/daily_levels.py --outdir out >> out/cron.log 2>&1
+35  9 * * 1-5  cd /path/to/GammaLevels && /usr/bin/python3 scripts/daily_levels.py --outdir out >> out/cron.log 2>&1
+```
+
+*Windows (Task Scheduler):* create a Basic Task → Daily → trigger 5:45 PM →
+action "Start a program" → `python` with arguments
+`scripts\daily_levels.py --outdir out` and "Start in" set to the repo folder.
+
+Each run drops `levels_NQ.pine` / `levels_ES.pine` — paste into TradingView once
+and every rerun refreshes the same file, so you just reload the script.
+
+> **Honest limit on free data:** yfinance open interest is **end-of-day**, so the
+> pre-open run uses the most recent OI snapshot (same lag his overnight levels
+> face). The 9:30am rerun won't have *live* intraday OI on the free feed — for
+> that you'd need a paid real-time options feed (the data layer is built to swap
+> one in). Free levels are directionally right and update daily.
 
 ## Drawing the levels on TradingView
 
@@ -123,10 +169,12 @@ gammalevels/
   blackscholes.py   # gamma / d1 / normal pdf
   gex.py            # GEX-by-strike, walls, zero-gamma flip, centroid
   levels.py         # weekly/monthly bucketing -> HP / MHP
-  data.py           # yfinance QQQ adapter + QQQ->NQ scaling
+  data.py           # yfinance adapters: NDX/SPX (+QQQ/SPY fallback), future price
   pinegen.py        # TradingView Pine v5 script generator
-app.py              # Streamlit dashboard
-scripts/print_levels.py   # CLI
+app.py              # Streamlit dashboard (pick NQ/ES, auto-scaled)
+scripts/daily_levels.py   # automated: tomorrow's HP/MHP for NQ+ES, schedulable
+scripts/print_levels.py   # single-underlying CLI
+research/                 # reverse-engineering study of his published levels
 tests/test_gex.py         # offline verification of the math
 ```
 

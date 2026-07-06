@@ -5,8 +5,9 @@ Run locally (needs network access to Yahoo Finance):
     pip install -r requirements.txt
     streamlit run app.py
 
-Then open the URL Streamlit prints.  Enter your current /NQ price to have the
-QQQ-derived levels scaled straight onto the NQ chart.
+Pick NQ or ES in the sidebar — it auto-fetches the index options (NDX/SPX, ETF
+proxy as fallback) and the live future price, computes HP/MHP, and scales the
+levels straight onto the future. No manual price entry.
 """
 
 from __future__ import annotations
@@ -16,9 +17,11 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from gammalevels import compute_hedge_levels, qqq_to_nq_factor
-from gammalevels.data import fetch_yfinance_chain
+from gammalevels import FUTURE_MAP, compute_hedge_levels, fetch_chain_for_future
 from gammalevels.pinegen import to_pine
+
+TV_CHART = {"NQ": "CME_MINI:NQ1!", "ES": "CME_MINI:ES1!"}
+PROXY = {"NQ": "QQQ", "ES": "SPY"}
 
 st.set_page_config(page_title="GammaLevels — HP / MHP", page_icon="📈", layout="wide")
 
@@ -32,70 +35,79 @@ METHOD_HELP = {
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def load_chain(symbol: str, max_expiries: int, min_oi: float):
-    """Fetch + cache the chain for a couple of minutes so slider tweaks are snappy."""
-    snap = fetch_yfinance_chain(symbol, max_expiries=max_expiries, min_open_interest=min_oi)
-    return snap
+def load_future(future: str, max_expiries: int, min_oi: float, force_proxy: bool):
+    """Fetch options + live future price for NQ/ES, cached for snappy tweaks."""
+    prefer = PROXY[future] if force_proxy else None
+    return fetch_chain_for_future(
+        future, max_expiries=max_expiries, min_open_interest=min_oi, prefer_underlying=prefer
+    )
 
 
 # ---------------------------------------------------------------- sidebar
 st.sidebar.title("GammaLevels")
-st.sidebar.caption("Dealer gamma-hedging levels, built from free options data.")
+st.sidebar.caption("Automated HP/MHP — you don't need his Discord post.")
 
-symbol = st.sidebar.text_input("Options underlying", value="QQQ").upper().strip()
+future = st.sidebar.selectbox(
+    "Future", list(FUTURE_MAP), index=0,
+    format_func=lambda f: f"{f} · {FUTURE_MAP[f]['name']}",
+)
 method = st.sidebar.selectbox(
     "HP / MHP definition", list(METHOD_HELP), index=0,
     format_func=lambda m: m.capitalize(),
 )
 st.sidebar.caption(METHOD_HELP[method])
 
-nq_price = st.sidebar.number_input(
-    "Current /NQ price (for scaling)", min_value=0.0, value=0.0, step=0.25,
-    help="Enter your live /NQ price to project QQQ levels onto the NQ chart. "
-         "Leave 0 to show levels in the underlying's own price.",
+force_proxy = st.sidebar.checkbox(
+    "Force free ETF proxy (QQQ/SPY)", value=False,
+    help="Off = use the index options his levels actually come from (NDX/SPX) "
+         "when available. On = always use the free ETF proxy.",
 )
 max_expiries = st.sidebar.slider("Expirations to load", 2, 16, 8)
 min_oi = st.sidebar.number_input("Min open interest per strike", min_value=0.0, value=0.0, step=50.0)
 
 if st.sidebar.button("↻ Refresh data", use_container_width=True):
-    load_chain.clear()
+    load_future.clear()
 
 # ---------------------------------------------------------------- main
 st.title("📈 Gamma Hedge Levels — HP / MHP")
 
 try:
-    snap = load_chain(symbol, max_expiries, min_oi)
+    inp = load_future(future, max_expiries, min_oi, force_proxy)
 except Exception as exc:  # network / symbol errors surface here
     st.error(
-        f"Couldn't load options for **{symbol}**: {exc}\n\n"
+        f"Couldn't load options for **{future}**: {exc}\n\n"
         "This dashboard needs outbound access to Yahoo Finance. If you're on a "
         "restricted network (or a sandbox), run it on your own machine."
     )
     st.stop()
 
+snap = inp.snapshot
+factor = inp.factor
+unit = f"/{future}"
 levels = compute_hedge_levels(snap.rows, snap.spot, snap.asof, method=method)
-
-factor = 1.0
-unit = symbol
-if nq_price and nq_price > 0:
-    factor = qqq_to_nq_factor(snap.spot, nq_price)
-    unit = "/NQ"
-
 scaled = levels.scaled(factor)
+is_proxy = inp.underlying in PROXY.values()
 
 # headline metrics
 c1, c2, c3, c4 = st.columns(4)
 c1.metric(f"HP · Weekly ({unit})", scaled["hp"], help=f"Weekly expiry {levels.weekly_expiry}")
 c2.metric(f"MHP · Monthly ({unit})", scaled["mhp"], help=f"Monthly expiry {levels.monthly_expiry}")
-c3.metric(f"Spot ({unit})", scaled["spot"])
+c3.metric(f"{future} price", round(inp.future_price, 2))
 regime = "🟢 long-gamma (mean-revert)" if (levels.monthly and levels.monthly.net_gex_at_spot > 0) else "🔴 short-gamma (trend)"
 c4.metric("Dealer regime (monthly)", regime)
 
+src = f"{inp.underlying} ({'ETF proxy' if is_proxy else 'index'})"
 st.caption(
-    f"Underlying **{symbol}** spot {snap.spot:.2f} · {snap.num_expiries} expiries · "
-    f"{len(snap.rows):,} contracts · as of {snap.asof:%Y-%m-%d %H:%M UTC}"
-    + (f" · scaling QQQ→NQ ×{factor:.3f}" if factor != 1.0 else "")
+    f"Options from **{src}** spot {snap.spot:.2f} · {snap.num_expiries} expiries · "
+    f"{len(snap.rows):,} contracts · scaled ×{factor:.4f} onto {future} · "
+    f"as of {snap.asof:%Y-%m-%d %H:%M UTC}"
 )
+if is_proxy:
+    st.warning(
+        "Using the ETF proxy — levels are directionally right but won't exactly "
+        "match his index-derived numbers. Uncheck 'Force free ETF proxy' to try "
+        "NDX/SPX index options.", icon="⚠️",
+    )
 
 
 def level_table(profile, title):
@@ -143,10 +155,10 @@ st.subheader("📤 Send to TradingView")
 st.caption(
     "Pine Script can't fetch data itself, so this bakes the current levels into a "
     "ready-to-paste indicator. Copy it → TradingView → **Pine Editor** → paste → "
-    "**Add to chart** (use the `CME_MINI:NQ1!` chart). Regenerate once or twice a "
-    "day since open interest is end-of-day."
+    f"**Add to chart** (use the `{TV_CHART[future]}` chart). Regenerate once or "
+    "twice a day since open interest is end-of-day."
 )
-pine_src = to_pine(levels, factor, snap.asof)
+pine_src = to_pine(levels, factor, snap.asof, symbol_note=TV_CHART[future])
 st.download_button(
     "⬇ Download gammalevels.pine", data=pine_src,
     file_name="gammalevels.pine", mime="text/plain", use_container_width=True,
