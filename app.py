@@ -18,6 +18,7 @@ import streamlit as st
 
 from gammalevels import compute_hedge_levels, qqq_to_nq_factor
 from gammalevels.data import fetch_yfinance_chain
+from gammalevels.pinegen import to_pine
 
 st.set_page_config(page_title="GammaLevels — HP / MHP", page_icon="📈", layout="wide")
 
@@ -136,6 +137,21 @@ with left:
 with right:
     level_table(levels.monthly, "Monthly (MHP)")
     gex_chart(levels.monthly, "Monthly")
+
+st.divider()
+st.subheader("📤 Send to TradingView")
+st.caption(
+    "Pine Script can't fetch data itself, so this bakes the current levels into a "
+    "ready-to-paste indicator. Copy it → TradingView → **Pine Editor** → paste → "
+    "**Add to chart** (use the `CME_MINI:NQ1!` chart). Regenerate once or twice a "
+    "day since open interest is end-of-day."
+)
+pine_src = to_pine(levels, factor, snap.asof)
+st.download_button(
+    "⬇ Download gammalevels.pine", data=pine_src,
+    file_name="gammalevels.pine", mime="text/plain", use_container_width=True,
+)
+st.code(pine_src, language="javascript")
 
 with st.expander("What am I looking at? (HP / MHP explained)"):
     st.markdown(

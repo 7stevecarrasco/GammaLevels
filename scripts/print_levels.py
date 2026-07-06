@@ -20,6 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gammalevels import compute_hedge_levels, fetch_yfinance_chain, qqq_to_nq_factor
+from gammalevels.pinegen import to_pine
 
 
 def main() -> int:
@@ -33,6 +34,8 @@ def main() -> int:
     ap.add_argument("--max-expiries", type=int, default=8)
     ap.add_argument("--min-oi", type=float, default=0.0, help="drop strikes at/below this OI")
     ap.add_argument("--json", metavar="PATH", default=None, help="also write result as JSON")
+    ap.add_argument("--pine", metavar="PATH", default=None,
+                    help="also write a TradingView Pine v5 script drawing the levels")
     args = ap.parse_args()
 
     print(f"Fetching {args.symbol} options chain...")
@@ -67,6 +70,12 @@ def main() -> int:
         with open(args.json, "w") as fh:
             json.dump(out, fh, indent=2)
         print(f"\nWrote {args.json}")
+
+    if args.pine:
+        pine = to_pine(levels, factor, snap.asof)
+        with open(args.pine, "w") as fh:
+            fh.write(pine)
+        print(f"Wrote {args.pine}  — paste it into TradingView's Pine editor on CME_MINI:NQ1!")
     return 0
 
 

@@ -82,11 +82,31 @@ streamlit run app.py
 # Or one-shot from the terminal, scaled onto NQ:
 python scripts/print_levels.py --nq 29881.5
 python scripts/print_levels.py --method centroid --json levels.json
+
+# Generate a TradingView Pine script with the levels drawn on it:
+python scripts/print_levels.py --nq 29881.5 --pine gammalevels.pine
 ```
 
 `--method` picks how HP/MHP is defined: `peak` (default, biggest magnet),
 `centroid` (gamma-weighted mean — gives smooth, non-round numbers like the
 services post), `flip`, `callwall`, `putwall`.
+
+## Drawing the levels on TradingView
+
+Pine Script **can't fetch external data** (no HTTP requests), so it can't pull
+gamma levels live. Instead this tool *generates* a Pine v5 indicator with the
+current levels baked in:
+
+1. In the dashboard, open **📤 Send to TradingView** and copy / download the
+   script (or run `--pine gammalevels.pine` on the CLI).
+2. In TradingView open **Pine Editor** → paste → **Add to chart**.
+3. Use the `CME_MINI:NQ1!` chart (levels are absolute prices, so any NQ chart
+   works).
+
+It draws HP + weekly walls in **teal**, MHP + monthly walls in **orange**, with
+right-edge price labels — and each level is an `input.price` you can drag to
+nudge. Because open interest is end-of-day, regenerate the script once or twice
+a day (e.g. at the NY open) to refresh.
 
 ## Verify the math
 
@@ -104,6 +124,7 @@ gammalevels/
   gex.py            # GEX-by-strike, walls, zero-gamma flip, centroid
   levels.py         # weekly/monthly bucketing -> HP / MHP
   data.py           # yfinance QQQ adapter + QQQ->NQ scaling
+  pinegen.py        # TradingView Pine v5 script generator
 app.py              # Streamlit dashboard
 scripts/print_levels.py   # CLI
 tests/test_gex.py         # offline verification of the math

@@ -144,6 +144,35 @@ def test_scaling_to_nq():
     print(f"  scaled MHP 600 -> {scaled['mhp']} (x50)  OK")
 
 
+def test_pine_generation():
+    """The Pine generator should emit valid-looking v5 source with the levels
+    baked in, scaled by the factor, and skip any None levels."""
+    from gammalevels.pinegen import to_pine
+
+    asof = datetime(2026, 7, 6, 12, 0, 0)
+    weekly, monthly = date(2026, 7, 10), date(2026, 7, 17)
+    rows = []
+    for k in (595, 600, 605):
+        rows.append(OptionRow(k, "C", 100, 0.2, weekly))
+        rows.append(OptionRow(k, "P", 100, 0.2, weekly))
+        rows.append(OptionRow(k, "C", 100, 0.2, monthly))
+        rows.append(OptionRow(k, "P", 100, 0.2, monthly))
+    rows.append(OptionRow(600, "C", 40000, 0.2, weekly))
+    rows.append(OptionRow(600, "C", 40000, 0.2, monthly))
+
+    levels = compute_hedge_levels(rows, spot=600.0, asof=asof, method="peak")
+    pine = to_pine(levels, factor=50.0, asof=asof)
+
+    assert "//@version=5" in pine
+    assert 'indicator("GammaLevels HP/MHP"' in pine
+    # HP=600 peak * 50 = 30000 baked in
+    assert "30000.0" in pine, "scaled HP should appear in the script"
+    assert 'input.price(' in pine and "draw_level(" in pine
+    # balanced var handles: one line + one label per drawn level
+    assert pine.count("var line ") == pine.count("var label ")
+    print(f"  pine script {len(pine)} chars, {pine.count('input.price(')} levels  OK")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     print(f"Running {len(tests)} checks...\n")
