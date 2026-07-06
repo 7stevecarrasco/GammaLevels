@@ -1,0 +1,97 @@
+//@version=5
+// Session Gap Maker — shades the gap between one session's CLOSE and the next
+// session's OPEN, and flags it when price trades back through (fills) it.
+//
+// Default session 0930-1600 (New York) = the US cash session, so the gap is
+// "yesterday's 4pm close -> today's 9:30 open" — the classic overnight gap for
+// index futures like NQ/ES. Change the Session input for a different window
+// (e.g. Globex 1800-1700).
+//
+// Green box = gap up · Red box = gap down · turns gray when filled.
+// Paste into TradingView's Pine Editor -> Add to chart. Use an intraday chart.
+indicator("Session Gap Maker", overlay=true, max_boxes_count=500, max_labels_count=500)
+
+// ---------------- Inputs ----------------
+sess      = input.session("0930-1600", "Session (close→open gap window)",
+   tooltip="Gap = this session's close to its next open. Default = US cash session.")
+tz        = input.string("America/New_York", "Session timezone")
+minGap    = input.float(0.0, "Min gap size (points)", minval=0)
+extendR   = input.bool(true, "Extend gap until filled")
+hideFill  = input.bool(false, "Remove gap once filled")
+showLbl   = input.bool(true, "Show gap size label")
+upCol     = input.color(color.new(color.lime, 80), "Gap up fill")
+dnCol     = input.color(color.new(color.red, 80),  "Gap down fill")
+fillCol   = input.color(color.new(color.gray, 85), "Filled color")
+maxActive = input.int(30, "Max active (unfilled) gaps", minval=1)
+
+// ---------------- Session detection ----------------
+inSess = not na(time(timeframe.period, sess, tz))
+isOpen = inSess and not inSess[1]         // first bar of the session
+
+// last close seen inside the session; at the next open it holds yesterday's close
+var float lastSessClose = na
+
+// ---------------- Active-gap state ----------------
+var gBox  = array.new_box()
+var gFill = array.new_float()   // price that fills the gap (the prior close)
+var gUp   = array.new_bool()
+var gLbl  = array.new_label()
+
+// ---------------- Create a gap at the session open ----------------
+if isOpen and not na(lastSessClose)
+    o  = open
+    pc = lastSessClose
+    gsize = math.abs(o - pc)
+    if gsize >= minGap and o != pc
+        up  = o > pc
+        top = math.max(o, pc)
+        bot = math.min(o, pc)
+        b = box.new(bar_index, top, bar_index + 1, bot,
+           border_color=color.new(up ? color.lime : color.red, 40),
+           bgcolor = up ? upCol : dnCol)
+        label lb = na
+        if showLbl
+            lb := label.new(bar_index, up ? top : bot,
+               (up ? "Gap Up " : "Gap Dn ") + str.tostring(gsize, format.mintick),
+               style = up ? label.style_label_down : label.style_label_up,
+               color=color.new(color.gray, 25), textcolor=color.white, size=size.small)
+        array.push(gBox, b)
+        array.push(gFill, pc)
+        array.push(gUp, up)
+        array.push(gLbl, lb)
+        // cap the number of active gaps (drop the oldest)
+        if array.size(gBox) > maxActive
+            box.delete(array.shift(gBox))
+            array.shift(gFill)
+            array.shift(gUp)
+            l0 = array.shift(gLbl)
+            if not na(l0)
+                label.delete(l0)
+
+// ---------------- Extend / fill-check active gaps ----------------
+if array.size(gBox) > 0
+    for i = array.size(gBox) - 1 to 0
+        b  = array.get(gBox, i)
+        fl = array.get(gFill, i)
+        up = array.get(gUp, i)
+        filled = up ? (low <= fl) : (high >= fl)
+        if filled
+            if hideFill
+                box.delete(b)
+                l = array.get(gLbl, i)
+                if not na(l)
+                    label.delete(l)
+            else
+                box.set_bgcolor(b, fillCol)
+                box.set_border_color(b, color.new(color.gray, 50))
+                box.set_right(b, bar_index)
+            array.remove(gBox, i)
+            array.remove(gFill, i)
+            array.remove(gUp, i)
+            array.remove(gLbl, i)
+        else if extendR
+            box.set_right(b, bar_index + 1)
+
+// update AFTER gap logic so the open bar reads yesterday's close
+if inSess
+    lastSessClose := close
