@@ -1,19 +1,24 @@
 //@version=5
-// Gap Maker — shades the gap between one period's CLOSE and the next period's
+// Gap Maker — shades the gap between one session's CLOSE and the next session's
 // OPEN, draws the 50% midpoint (the key half-gap level), and flags the gap when
 // price fills it.
 //
 // Gap basis (input):
-//   Weekly       -> last week's close  -> new week's open   (weekend gap; DEFAULT)
-//   Daily        -> prior day's close  -> today's open
-//   Session (RTH)-> the session's close -> next session open (0930-1600 = cash)
+//   Weekend       -> Friday's close  -> the new week's (Sunday) open   (DEFAULT)
+//   Session (RTH) -> the session's close -> next session open (0930-1600 = cash)
+//
+// Weekend detection is robust: futures don't print bars over the weekend, so the
+// first bar after a >20h break IS the weekend open, and the bar before it is
+// Friday's close. No request.security, no alignment quirks.
 //
 // Green box = gap up · Red box = gap down · gray = filled · dashed line = 50%.
 // Paste into TradingView's Pine Editor -> Add to chart. Use an intraday chart.
 indicator("Gap Maker", overlay=true, max_boxes_count=500, max_labels_count=500, max_lines_count=500)
 
 // ---------------- Inputs ----------------
-gapMode   = input.string("Weekly", "Gap basis", options=["Weekly", "Daily", "Session (RTH)"])
+gapMode   = input.string("Weekend", "Gap basis", options=["Weekend", "Session (RTH)"])
+breakHrs  = input.float(20.0, "Weekend = bar gap longer than (hours)",
+   tooltip="Weekend closes are ~48h; daily breaks ~1h. 20h cleanly isolates weekends & holidays.")
 sess      = input.session("0930-1600", "RTH session (Session mode only)")
 tz        = input.string("America/New_York", "Timezone")
 minGap    = input.float(0.0, "Min gap size (points)", minval=0)
@@ -34,11 +39,9 @@ inSess = not na(time(timeframe.period, sess, tz))
 isSessOpen = inSess and not inSess[1]
 var float lastSessClose = na
 
-// Weekly / Daily path (higher-timeframe close -> open)
-htf = gapMode == "Weekly" ? "W" : "D"
-htfOpen      = request.security(syminfo.tickerid, htf, open,      lookahead=barmerge.lookahead_on)
-htfPrevClose = request.security(syminfo.tickerid, htf, close[1],  lookahead=barmerge.lookahead_on)
-htfNew       = timeframe.change(htf)
+// Weekend path: a bar-to-bar time jump longer than breakHrs = a weekend/holiday open
+breakMs = time - nz(time[1], time)
+isWeekendOpen = not na(time[1]) and breakMs > breakHrs * 3600.0 * 1000.0
 
 bool  isNewGap = false
 float gO  = na
@@ -48,9 +51,9 @@ if gapMode == "Session (RTH)"
     gO  := open
     gPC := lastSessClose
 else
-    isNewGap := htfNew and not na(htfPrevClose)
-    gO  := htfOpen
-    gPC := htfPrevClose
+    isNewGap := isWeekendOpen
+    gO  := open
+    gPC := close[1]
 
 // ---------------- Active-gap state ----------------
 var gBox    = array.new_box()
@@ -61,7 +64,7 @@ var gMid    = array.new_line()    // 50% line
 var gMidLbl = array.new_label()   // 50% price label
 
 // ---------------- Create a gap ----------------
-if isNewGap
+if isNewGap and not na(gPC)
     o  = gO
     pc = gPC
     gsize = math.abs(o - pc)
