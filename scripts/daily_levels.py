@@ -39,11 +39,16 @@ TV_CHART = {"NQ": "CME_MINI:NQ1!", "ES": "CME_MINI:ES1!"}
 PROXY = {"NQ": "QQQ", "ES": "SPY"}
 
 
-def run_one(future: str, method: str, max_expiries: int, min_oi: float, force_proxy: bool):
-    prefer = PROXY[future] if force_proxy else None
-    inp = fetch_chain_for_future(
-        future, max_expiries=max_expiries, min_open_interest=min_oi, prefer_underlying=prefer
-    )
+def run_one(future: str, method: str, max_expiries: int, min_oi: float, force_proxy: bool,
+            demo: bool = False):
+    if demo:
+        from gammalevels.demo import demo_input
+        inp = demo_input(future)
+    else:
+        prefer = PROXY[future] if force_proxy else None
+        inp = fetch_chain_for_future(
+            future, max_expiries=max_expiries, min_open_interest=min_oi, prefer_underlying=prefer
+        )
     levels = compute_hedge_levels(
         inp.snapshot.rows, inp.snapshot.spot, inp.snapshot.asof, method=method
     )
@@ -74,18 +79,22 @@ def main() -> int:
     ap.add_argument("--max-expiries", type=int, default=8)
     ap.add_argument("--min-oi", type=float, default=0.0)
     ap.add_argument("--proxy", action="store_true", help="force free ETF proxy (QQQ/SPY)")
+    ap.add_argument("--demo", action="store_true",
+                    help="run offline on synthetic data (no network; for previews/self-test)")
     ap.add_argument("--outdir", default=".", help="where to write JSON + .pine (default: cwd)")
     args = ap.parse_args()
 
     futures = [args.single] if args.single else args.futures
     os.makedirs(args.outdir, exist_ok=True)
+    if args.demo:
+        print("** DEMO MODE ** offline synthetic data — not real levels.\n")
 
     all_out = {}
     for fut in futures:
         print(f"\n=== {fut} ({FUTURE_MAP[fut]['name']}) ===")
         try:
             inp, levels, scaled, pine = run_one(
-                fut, args.method, args.max_expiries, args.min_oi, args.proxy
+                fut, args.method, args.max_expiries, args.min_oi, args.proxy, demo=args.demo
             )
         except Exception as exc:
             print(f"  FAILED: {exc}")

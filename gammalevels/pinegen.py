@@ -85,10 +85,11 @@ def to_pine(
     asof = asof or levels.asof
     items = _collect_levels(levels, factor)
 
+    scale_note = "" if abs(factor - 1.0) < 1e-9 else f", scaled x{factor:.4f} onto the future"
     header = f"""//@version=5
 // GammaLevels — HP / MHP dealer gamma-hedging levels
-// Generated {asof:%Y-%m-%d %H:%M UTC} from QQQ options{'' if factor == 1.0 else f', scaled x{factor:.4f} onto /NQ'}
-// Intended chart: {symbol_note}  (levels are absolute prices; any NQ chart works)
+// Generated {asof:%Y-%m-%d %H:%M UTC} from options open interest{scale_note}
+// Intended chart: {symbol_note}  (levels are absolute prices; any matching chart works)
 // Options OI is end-of-day — regenerate once or twice a day to stay current.
 indicator("GammaLevels HP/MHP", overlay=true, max_lines_count=32, max_labels_count=32)
 

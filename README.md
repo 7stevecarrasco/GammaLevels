@@ -111,7 +111,11 @@ future:
 python scripts/daily_levels.py                 # NQ + ES, writes levels_*.json / .pine
 python scripts/daily_levels.py --method centroid --outdir ~/gammalevels_out
 python scripts/daily_levels.py --future NQ --proxy   # force free QQQ
+python scripts/daily_levels.py --demo               # offline self-test, no network
 ```
+
+`--demo` runs the whole pipeline on synthetic data (no Yahoo needed) so you can
+see the output shape and test scheduling before trusting live numbers.
 
 **Schedule it** so the levels are ready before the 6pm ET Globex open, and
 again after the 9:30am ET NY open (when he says the platform recalculates on
