@@ -1,0 +1,11 @@
+# Core engine
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10          # reserved for future greeks; engine uses stdlib math today
+
+# Free data source (QQQ options open interest + IV)
+yfinance>=0.2.40
+
+# Dashboard
+streamlit>=1.30
+altair>=5.0
